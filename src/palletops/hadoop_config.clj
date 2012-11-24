@@ -2,7 +2,7 @@
   "Hadoop configuration library."
   (:use
    [clojure.algo.monads :only [m-map]]
-   [palletops.locos :only [apply-rules defrules config]]
+   [palletops.locos :only [defrules apply-productions !_]]
    [pallet.crate :only [def-plan-fn nodes-with-role target target-node]]
    [pallet.debug :only [assertf]]
    [pallet.node :only [hardware]]))
@@ -90,20 +90,71 @@
 ;;; estimation.
 (defrules os-size-rules
   ;; generic rules
-  [{:hardware {:ram ?r}}
-   {:pallet.vm.ram ?r
-    :pallet.os.size 300                 ; estimate of os size
-    :pallet.os.cache (int (* (- ?r 300) 0.2)) ; estimate of a disk cache
-    :kernel.fs.file-max 65535
-    :kernel.vm.swapiness 0
+
+  ;; note that variants of a rule should have matching logic vars in the pattern
+  ;; to ensure that they are all applied at once.
+  ^{:name :default-ram}
+  [{:hardware {:ram ?r} :pallet.vm.ram !_}
+   {:pallet.vm.ram ?r}]
+
+  ^{:name :os-size-base}                ; estimate of os size
+  [{:hardware {:ram ?r} :pallet.os.size !_}
+   {:pallet.os.size 300}]
+
+  ^{:name :total-cores}
+  [{:hardware {:cpus ?c} :pallet.vm.cores !_}
+   {:pallet.vm.cores (reduce + (map :cores ?c))}]
+
+  ^{:name :os-cache}                    ; estimate of a reasonable disk cache
+  [{:pallet.vm.ram ?m :pallet.os.size ?o :pallet.os.cache !_}
+   {:pallet.os.cache (int (* (- ?m ?o) 0.2))}]
+
+  ^{:name :file-descriptors}            ; file descriptors to configure
+  [{:pallet.vm.ram ?r :kernel.fs.file-max !_}
+   {:kernel.fs.file-max 65535}]
+
+  ^{:name :file-descriptors-small}
+  [{:pallet.vm.ram ?r :kernel.fs.file-max !_}
+   {:kernel.fs.file-max 10240}
+   (< ?r 2048)]
+
+  ^{:name :swapiness}
+  [{:pallet.vm.ram ?r :kernel.vm.swapiness !_}
+   {:kernel.vm.swapiness 0
     :kernel.vm.overcommit 0}]
-  ;; modified rules for small nodes
-  [{:hardware {:ram ?r}}
-   {:kernel.fs.file-max 10240
-    :kernel.vm.overcommit 1             ; maybe only matters when using hadoop
+
+  ^{:name :swapiness-small}
+  [{:pallet.vm.ram ?r :kernel.vm.swapiness !_}
+   {:kernel.vm.swapiness 0
+    :kernel.vm.overcommit 0}
+   (< ?r 2048)]
+
+  ^{:name :overcommit}
+  [{:pallet.vm.ram ?r :kernel.vm.overcommit !_}
+   {:kernel.vm.swapiness 0}]
+
+  ^{:name :overcommit-small}
+  [{:pallet.vm.ram ?r :kernel.vm.overcommit !_}
+   {:kernel.vm.overcommit 1             ; maybe only matters when using hadoop
                                         ; streaming
-    :kernel.vm.overcommit_ration 0.25}
-   [< ?r 2048]])
+    :kernel.vm.overcommit_pc 25}
+   (< ?r 2048)]
+
+  ^{:name :free-ram}                    ; ram - os ram - file descriptor space
+  [{:pallet.vm.free-ram !_
+    :pallet.vm.ram ?r
+    :pallet.os.size ?o
+    :kernel.fs.file-max ?f}
+   {:pallet.vm.free-ram
+    (int (- ?r ?o (/ ?f 1024.0)))}]
+
+  ^{:name :applicaton-ram}              ; free-ram - disk cache
+  [{:pallet.vm.free-ram ?f :pallet.vm.application-ram !_
+    :pallet.os.cache ?c}
+   {:pallet.vm.application-ram
+    (int (- ?f ?c))}])
+
+
 
 (def-plan-fn os-size-model
   "Returns an estimate for the OS size on the current node. The rules can be
@@ -120,20 +171,9 @@
    node target-node
    m (m-result {:roles (:roles target)
                 :hardware (hardware node)})
-   model (m-result (config m rules))]
+   model (m-result (apply-productions m rules))]
   (assertf (seq model) "Failed to find an os size model for %s" m)
-  (m-result (merge
-             (assoc model
-               :pallet.vm.free-ram
-               (int (- (:pallet.vm.ram model)
-                       (:pallet.os.size model)
-                       (/ (:kernel.fs.file-max model) 1024.0)))
-               :pallet.vm.application-ram
-               (int (- (:pallet.vm.ram model)
-                       (:pallet.os.size model)
-                       (:pallet.os.cache model)
-                       (/ (:kernel.fs.file-max model) 1024.0))))
-              overrides)))
+  (m-result model))
 
 ;;; # Node Configuration Sizing
 
@@ -147,56 +187,66 @@
 ;;; Namenode and jobtracker threads are estimated based on cluster size.
 (defrules node-config-sizing-rules
 
-  ;; dedicated namenode
+  ^{:name :dedicated-namenode}
   [{:roles #{:name-node}
-    :hardware {:ram ?r }
-    :os {:pallet.vm.application-ram ?f}
+    :pallet.vm.application-ram ?f
     :cluster {:datanodes ?d}}
    {:pallet.namenode.mx ?f
     :dfs.namenode.handler.count (max 10 (int (* 20 (Math/log (double ?d)))))}]
 
-  ;; dedicated jobtracker
+  ^{:name :dedicated-jobtracker}
   [{:roles #{:job-tracker}
-    :hardware {:ram ?r }
-    :os {:pallet.vm.application-ram ?f}
+    :pallet.vm.application-ram ?f
     :cluster {:tasknodes ?t}}
    {:pallet.jobtracker.mx ?f
     :mapred.job.tracker.handler.count
     (max 10 (int (* 20 (Math/log (double ?t)))))}]
 
-  ;; mixed namenode and jobtracker
+  ^{:name :mixed-namenode-jobtracker}
   [{:roles #{:name-node :job-tracker}
-    :hardware {:ram ?r }
-    :os {:pallet.vm.application-ram ?f}
+    :pallet.vm.application-ram ?f
     :cluster {:tasknodes ?t}}
    {:pallet.namenode.mx (* ?f 0.25)
     :pallet.jobtracker.mx (* ?r 0.75)}]
-  [{:roles #{:name-node :job-tracker} :hardware {:ram ?r }}
-   {:namenode-mx (* ?r 0.5)}
-   [> ?r 1024]]
 
+  ^{:name :mixed-namenode-jobtracker-small}
+  [{:roles #{:name-node :job-tracker}
+    :pallet.vm.application-ram ?f}
+   {:pallet.namenode.mx 384
+    :pallet.jobtracker.mx 384}
+   (< ?f 2048)]
 
-  ;; mixed datanode and tasktracker - "normal"
+  ^{:name :mixed-datanode-tasktracker}
   [{:roles #{:data-node :task-tracker}
-    :hardware {:ram ?r :cpus ?c}
-    :os {:pallet.vm.application-ram ?f}
-    :cluster {:task-tracker ?t}}
+    :pallet.vm.application-ram ?f
+    :pallet.vm.cores ?c}
    {:pallet.datanode.mx 384
     :pallet.tasktracker.mx 384
-    :pallet.task.mx (- ?f 384 384)
-    :mapred.tasktracker.map.tasks.maximum
-    (int (* 2 (reduce + (map :cores ?c))))
-    :mapred.tasktracker.reduce.tasks.maximum
-    (max 1 (int (* 0.6 (reduce + (map :cores ?c)))))}]
+    :mapred.tasktracker.map.tasks.maximum (int (* 2 ?c))
+    :mapred.tasktracker.reduce.tasks.maximum (max 1 (int (* 0.6 ?c)))
+    }]
 
-  ;; mixed datanode and tasktracker - "small"
+  ^{:name :mixed-datanode-tasktracker-small}
   [{:roles #{:data-node :task-tracker}
-    :hardware {:ram ?r}
-    :os {:pallet.vm.application-ram ?f}}
+    :pallet.vm.application-ram ?f
+    :pallet.vm.cores ?c}
    {:pallet.datanode.mx 96
-    :pallet.tasktracker.mx 192
-    :pallet.task.mx (- ?f 192 96)}
-   [< ?r 2048]])
+    :pallet.tasktracker.mx 192}
+   (< ?f 2048)]
+
+  ^{:name :total-child-process-size}
+  [{:pallet.vm.application-ram ?f
+    :pallet.datanode.mx ?d
+    :pallet.tasktracker.mx ?t}
+   {:pallet.task.mx (- ?f ?d ?t)}]
+
+  ^{:name :child-process-size}
+  [{:pallet.childtask.mx !_
+    :pallet.task.mx ?t
+    :mapred.tasktracker.map.tasks.maximum ?m
+    :mapred.tasktracker.reduce.tasks.maximum ?r}
+   {:pallet.childtask.mx (int (/ ?t (+ ?m ?r)))}]
+  )
 
 (def-plan-fn node-count-for-role
   [role]
@@ -216,17 +266,14 @@
   [target target
    node target-node
    cluster (cluster-role-counts)
-   m (m-result {:roles (:roles target)
-                :hardware (hardware node)
-                :os os-size
-                :cluster cluster})
-   config (m-result (config m rules))]
+   m (m-result (palletops.locos/deep-merge
+                {:roles (:roles target)
+                 :hardware (hardware node)
+                 :cluster cluster}
+                os-size))
+   config (m-result (apply-productions m rules))]
   (assertf (seq config) "Failed to find a node config for %s" m)
-  (m-result (assoc config
-              :pallet.childtask.mx
-              (int (/ (:pallet.task.mx config)
-                      (+ (:mapred.tasktracker.map.tasks.maximum config)
-                         (:mapred.tasktracker.reduce.tasks.maximum config)))))))
+  (m-result config))
 
 (def-plan-fn default-node-config
   "An all in one configuration function. Use of this function is optional."
