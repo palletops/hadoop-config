@@ -2,14 +2,42 @@
   "Hadoop configuration library."
   (:use
    [clojure.algo.monads :only [m-map]]
+   [clojure.tools.logging :only [debugf]]
    [palletops.locos :only [defrules apply-productions !_]]
    [pallet.crate :only [def-plan-fn nodes-with-role target target-node]]
    [pallet.debug :only [assertf]]
    [pallet.node :only [hardware]]))
 
+;;; Some static defaults, that have no dependent configuration values,
+;;; and are not dependent on install location, daemon location, etc.
+(def static-defaults
+  {
+   :fs.trash.interval 1440        ; should trash be on or off by default?
+   :io.file.buffer.size 65536     ; maybe this should be checked vs hw page size
+   :dfs.permissions.enabled true
+   :mapred.map.tasks.speculative.execution true
+   :mapred.reduce.tasks.speculative.execution false
+
+   :mapred.reduce.parallel.copies 10
+   :mapred.reduce.tasks 5
+   :mapred.submit.replication 10
+   :mapred.compress.map.output true
+   :mapred.output.compression.type "BLOCK"})
+
+(def hadoop-class-details
+  {:hadoop.rpc.socket.factory.class.default
+   "org.apache.hadoop.net.StandardSocketFactory"
+   :hadoop.rpc.socket.factory.class.ClientProtocol ""
+   :hadoop.rpc.socket.factory.class.JobSubmissionProtocol ""
+   :io.compression.codecs               ; LZO compression?
+   (str
+    "org.apache.hadoop.io.compress.DefaultCodec,"
+    "org.apache.hadoop.io.compress.GzipCodec")})
+
 ;;; http://www.flumotion.net/doc/flumotion/manual/en/trunk/html/section-configuration-system.html
 ;;; intel paper on tuning hadoop
-
+;;; http://allthingshadoop.com/2010/04/28/map-reduce-tips-tricks-your-first-real-cluster/
+;;; http://blog.cloudera.com/blog/2009/03/configuration-parameters-what-can-you-just-ignore/
 
 ;;; Using the job streaming interface spawns extra processes so affects memory
 ;;; size?
@@ -105,6 +133,16 @@
   [{:hardware {:cpus ?c} :pallet.vm.cores !_}
    {:pallet.vm.cores (reduce + (map :cores ?c))}]
 
+  ^{:name :total-disk}
+  [{:hardware {:disks ?d} :pallet.vm.disk-size !_}
+   {:pallet.vm.disk-size (reduce + (map :size '?d))}]
+
+  ;; the free disk estimate needs to improve
+  ;; OS, log files, metrics, etc all take disk space
+  ^{:name :free-disk}
+  [{:pallet.vm.disk-size ?d :pallet.vm.free-disk !_}
+   {:pallet.vm.free-disk (- ?d 10) }]   ; Gb
+
   ^{:name :os-cache}                    ; estimate of a reasonable disk cache
   [{:pallet.vm.ram ?m :pallet.os.size ?o :pallet.os.cache !_}
    {:pallet.os.cache (int (* (- ?m ?o) 0.2))}]
@@ -169,8 +207,9 @@
   [& {:keys [rules overrides] :or {rules os-size-rules}}]
   [target target
    node target-node
-   m (m-result {:roles (:roles target)
-                :hardware (hardware node)})
+   m (m-result (merge {:roles (:roles target)
+                       :hardware (hardware node)}
+                      overrides))
    model (m-result (apply-productions m rules))]
   (assertf (seq model) "Failed to find an os size model for %s" m)
   (m-result model))
@@ -188,14 +227,14 @@
 (defrules node-config-sizing-rules
 
   ^{:name :dedicated-namenode}
-  [{:roles #{:name-node}
+  [{:roles #{:namenode :datanode}
     :pallet.vm.application-ram ?f
     :cluster {:datanodes ?d}}
    {:pallet.namenode.mx ?f
     :dfs.namenode.handler.count (max 10 (int (* 20 (Math/log (double ?d)))))}]
 
   ^{:name :dedicated-jobtracker}
-  [{:roles #{:job-tracker}
+  [{:roles #{:jobtracker}
     :pallet.vm.application-ram ?f
     :cluster {:tasknodes ?t}}
    {:pallet.jobtracker.mx ?f
@@ -203,31 +242,37 @@
     (max 10 (int (* 20 (Math/log (double ?t)))))}]
 
   ^{:name :mixed-namenode-jobtracker}
-  [{:roles #{:name-node :job-tracker}
+  [{:roles #{:namenode :jobtracker :datanode}
     :pallet.vm.application-ram ?f
     :cluster {:tasknodes ?t}}
    {:pallet.namenode.mx (* ?f 0.25)
     :pallet.jobtracker.mx (* ?r 0.75)}]
 
   ^{:name :mixed-namenode-jobtracker-small}
-  [{:roles #{:name-node :job-tracker}
+  [{:roles #{:namenode :jobtracker :datanode}
     :pallet.vm.application-ram ?f}
    {:pallet.namenode.mx 384
     :pallet.jobtracker.mx 384}
    (< ?f 2048)]
 
   ^{:name :mixed-datanode-tasktracker}
-  [{:roles #{:data-node :task-tracker}
+  [{:roles #{:datanode :tasktracker}
     :pallet.vm.application-ram ?f
     :pallet.vm.cores ?c}
    {:pallet.datanode.mx 384
     :pallet.tasktracker.mx 384
     :mapred.tasktracker.map.tasks.maximum (int (* 2 ?c))
     :mapred.tasktracker.reduce.tasks.maximum (max 1 (int (* 0.6 ?c)))
-    }]
+    :tasktracker.http.threads 46
+    :dfs.datanode.max.xcievers 4096}]
 
-  ^{:name :mixed-datanode-tasktracker-small}
-  [{:roles #{:data-node :task-tracker}
+  ^{:name :mixed-datanode-tasktracker}
+  [{:roles #{:datanode :tasktracker}
+    :pallet.vm.free-disk ?d}
+   {:dfs.datanode.du.reserved (bigint (* 0.3 ?d))}] ; a guess (bytes/volume)
+
+^{:name :mixed-datanode-tasktracker-small}
+  [{:roles #{:datanode :tasktracker}
     :pallet.vm.application-ram ?f
     :pallet.vm.cores ?c}
    {:pallet.datanode.mx 96
@@ -246,6 +291,25 @@
     :mapred.tasktracker.map.tasks.maximum ?m
     :mapred.tasktracker.reduce.tasks.maximum ?r}
    {:pallet.childtask.mx (int (/ ?t (+ ?m ?r)))}]
+
+
+  ;; replication
+  ^{:name :replication}
+  [{:cluster {:datanodes ?d}}
+   {:dfs.replication 3}]
+
+  ^{:name :replication-single}
+  [{:cluster {:datanodes ?d}}
+   {:dfs.replication 1}
+   (< ?d 4)]
+
+  ^{:name :replication-two}
+  [{:cluster {:datanodes ?d}}
+   {:dfs.replication 2}
+   (< ?d 10) (> ?d 3)]
+
+  ;; TODO
+  ;; dfs.block.size
   )
 
 (def-plan-fn node-count-for-role
@@ -256,13 +320,14 @@
 (def-plan-fn cluster-role-counts
   []
   [count-vecs (m-map node-count-for-role
-                     [:job-tracker :name-node :task-tracker :data-node])]
+                     [:jobtracker :namenode :tasktracker :datanode])]
   (m-result (into {} count-vecs)))
 
 (def-plan-fn node-config
   "Plan function to return a configuration map for a node. The rules can
    be passed with the :rules keyword."
   [os-size & {:keys [rules] :or {rules node-config-sizing-rules}}]
+  (m-result (debugf "node-config os-size %s" os-size))
   [target target
    node target-node
    cluster (cluster-role-counts)
@@ -271,14 +336,23 @@
                  :hardware (hardware node)
                  :cluster cluster}
                 os-size))
+   _ (m-result (debugf "node-config m %s" m))
    config (m-result (apply-productions m rules))]
   (assertf (seq config) "Failed to find a node config for %s" m)
+  (m-result (debugf "node-config %s" config))
   (m-result config))
 
 (def-plan-fn default-node-config
-  "An all in one configuration function. Use of this function is optional."
-  [& {:keys [os-rules node-config-rules]
-      :or {os-rules os-size-rules node-config-rules node-config-sizing-rules}}]
-  [os-size (os-size-model :rules os-rules)
+  "An all in one configuration function. You can pass a map of property values
+  as `config`.
+
+  Use of this function is optional - you can call the constituent functions
+  if you need more flexibility."
+  [config & {:keys [os-rules node-config-rules]
+             :or {os-rules os-size-rules
+                  node-config-rules node-config-sizing-rules}}]
+  [os-size (os-size-model :rules os-rules :overrides config)
    node-config (node-config os-size :rules node-config-rules)]
-  (m-result (merge os-size node-config)))
+  (m-result (->
+             (merge static-defaults hadoop-class-details os-size node-config)
+             (dissoc :hardware :roles :cluster))))
