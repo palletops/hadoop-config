@@ -337,7 +337,6 @@
   "Plan function to return a configuration map for a node. The rules can
    be passed with the :rules keyword."
   [os-size & {:keys [rules] :or {rules node-config-sizing-rules}}]
-  (m-result (debugf "node-config os-size %s" os-size))
   [target target
    node target-node
    cluster (cluster-role-counts)
@@ -346,7 +345,6 @@
                  :hardware (hardware node)
                  :cluster cluster}
                 os-size))
-   _ (m-result (debugf "node-config m %s" m))
    config (m-result (apply-productions m rules))]
   (assertf (seq config) "Failed to find a node config for %s" m)
   (m-result (debugf "node-config %s" config))
@@ -363,6 +361,19 @@
            (assoc-in (->> (split (name k) #"\.") (map keyword)) v))
        m))
    m m))
+
+(defn nested-maps->dotted-keys
+  ([m prefix]
+     (reduce
+      (fn [result [key value]]
+        (if (map? value)
+          (merge result
+                 (nested-maps->dotted-keys value (str prefix (name key) ".")))
+          (assoc result (keyword (str prefix (name key))) value)))
+      {}
+      m))
+  ([m]
+     (nested-maps->dotted-keys m "")))
 
 (def-plan-fn default-node-config
   "An all in one configuration function. You can pass a map of property values
