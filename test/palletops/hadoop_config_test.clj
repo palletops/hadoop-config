@@ -8,32 +8,43 @@
    [palletops.ec2.meta :only [instance-types]]))
 
 (deftest m1-small-os-size-model-test
-  (is (= (merge
-          {:hardware (:m1.small instance-types) :roles nil}
-          {:pallet.vm.ram 1740
-           :pallet.vm.cores 1
-           :pallet.vm.free-disk 150
-           :pallet.vm.disk-size 160
-           :pallet.os.size 300
-           :pallet.os.cache 288
-           :pallet.vm.application-ram 1142
-           :pallet.vm.free-ram 1430
-           :kernel.vm.overcommit_pc 25
-           :kernel.vm.overcommit 1
-           :kernel.vm.swapiness 0
-           :kernel.fs.file-max 10240
-           })
-         (first
-          ((os-size-model)
-           (test-session
-            {:server
-             {:node (make-node "nn" "gg" "123.123.12.12" :ubuntu
-                               :hardware (:m1.small instance-types))}}))))))
+  (let [result (first
+                ((os-size-model)
+                 (test-session
+                  {:server
+                   {:node (make-node "nn" "gg" "123.123.12.12" :ubuntu
+                                     :hardware (:m1.small instance-types))}})))]
+    (is (= (merge
+            {:hardware (:m1.small instance-types) :roles nil}
+            {:pallet.vm.ram 1740
+             :pallet.vm.cores 1
+             :pallet.vm.free-disk 150
+             :pallet.vm.disk-size 160
+             :pallet.os.size 300
+             :pallet.os.cache 288
+             :pallet.vm.application-ram 1142
+             :pallet.vm.free-ram 1430
+             :kernel.vm.overcommit_pc 25
+             :kernel.vm.overcommit 1
+             :kernel.vm.swapiness 0
+             :kernel.fs.file-max 10240
+             })
+           result))
+    (is (= [:default-ram :os-size-base :total-cores :total-disk :free-disk
+            :os-cache :file-descriptors :file-descriptors-small :swapiness
+            :swapiness-small :overcommit :overcommit-small :free-ram
+            :applicaton-ram]
+           (-> result meta :rules)))))
 
 (deftest m1-small-default-node-config-test
   (let [node {:node (make-node "nn" "gg" "123.123.12.12" :ubuntu
                                :hardware (:m1.small instance-types))
-              :roles #{:datanode :tasktracker}}]
+              :roles #{:datanode :tasktracker}}
+        result (first
+                ((default-node-config {})
+                 (test-session
+                  {:server node
+                   :service-state [node]})))]
     (is (= {
             :dfs.permissions.enabled true
             :dfs.datanode.du.reserved 45N
@@ -59,25 +70,26 @@
             :mapred.submit.replication 10
             :mapred.tasktracker.map.tasks.maximum 2
             :mapred.tasktracker.reduce.tasks.maximum 1
-            :pallet.childtask.mx 284
-            :pallet.datanode.mx 96
-            :pallet.os.cache 288
-            :pallet.os.size 300
-            :pallet.task.mx 854
-            :pallet.tasktracker.mx 192
-            :pallet.vm.application-ram 1142
-            :pallet.vm.cores 1
-            :pallet.vm.disk-size 160
-            :pallet.vm.free-disk 150
-            :pallet.vm.free-ram 1430
-            :pallet.vm.ram 1740
-            :tasktracker.http.threads 46
-            }
-           (first
-            ((default-node-config {})
-             (test-session
-              {:server node
-               :service-state [node]})))))))
+            :pallet {:os {:cache 288
+                          :size 300}
+                     :childtask {:mx 284}
+                     :datanode {:mx 96}
+                     :task {:mx 854}
+                     :tasktracker {:mx 192}
+                     :vm {:application-ram 1142
+                          :cores 1
+                          :disk-size 160
+                          :free-disk 150
+                          :free-ram 1430
+                          :ram 1740}}
+            :tasktracker.http.threads 46}
+           result))
+    (is (= [:mixed-datanode-tasktracker
+            :mixed-datanode-tasktracker-du
+            :mixed-datanode-tasktracker-small
+            :total-child-process-size
+            :child-process-size]
+           (-> result meta :rules)))))
 
 (deftest cc2-8xlarge-os-size-model-test
   (is (= {:roles nil
@@ -128,18 +140,18 @@
             :mapred.tasktracker.map.tasks.maximum 32
             :mapred.tasktracker.reduce.tasks.maximum 9
             :mapred.submit.replication 10
-            :pallet.childtask.mx 1182
-            :pallet.datanode.mx 384
-            :pallet.os.cache 12330
-            :pallet.os.size 300
-            :pallet.task.mx 48490
-            :pallet.tasktracker.mx 384
-            :pallet.vm.application-ram 49258
-            :pallet.vm.cores 16
-            :pallet.vm.disk-size 3370
-            :pallet.vm.free-disk 3360
-            :pallet.vm.free-ram 61588
-            :pallet.vm.ram 61952
+            :pallet {:childtask {:mx 1182}
+                     :datanode {:mx 384}
+                     :task {:mx 48490}
+                     :tasktracker {:mx 384}
+                     :os {:cache 12330
+                          :size 300}
+                     :vm {:application-ram 49258
+                          :cores 16
+                          :disk-size 3370
+                          :free-disk 3360
+                          :free-ram 61588
+                          :ram 61952}}
             :tasktracker.http.threads 46
             }
            (first

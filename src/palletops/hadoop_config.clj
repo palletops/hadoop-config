@@ -2,8 +2,9 @@
   "Hadoop configuration library."
   (:use
    [clojure.algo.monads :only [m-map]]
+   [clojure.string :only [split]]
    [clojure.tools.logging :only [debugf]]
-   [palletops.locos :only [defrules apply-productions !_]]
+   [palletops.locos :only [defrules deep-merge apply-productions !_]]
    [pallet.crate :only [def-plan-fn nodes-with-role target target-node]]
    [pallet.debug :only [assertf]]
    [pallet.node :only [hardware]]))
@@ -258,7 +259,9 @@
   ^{:name :mixed-datanode-tasktracker}
   [{:roles #{:datanode :tasktracker}
     :pallet.vm.application-ram ?f
-    :pallet.vm.cores ?c}
+    :pallet.vm.cores ?c
+    :pallet.datanode.mx !_
+    :pallet.tasktracker.mx !_}
    {:pallet.datanode.mx 384
     :pallet.tasktracker.mx 384
     :mapred.tasktracker.map.tasks.maximum (int (* 2 ?c))
@@ -266,15 +269,18 @@
     :tasktracker.http.threads 46
     :dfs.datanode.max.xcievers 4096}]
 
-  ^{:name :mixed-datanode-tasktracker}
+  ^{:name :mixed-datanode-tasktracker-du}
   [{:roles #{:datanode :tasktracker}
-    :pallet.vm.free-disk ?d}
+    :pallet.vm.free-disk ?d
+    :dfs.datanode.du.reserved !_}
    {:dfs.datanode.du.reserved (bigint (* 0.3 ?d))}] ; a guess (bytes/volume)
 
-^{:name :mixed-datanode-tasktracker-small}
+  ^{:name :mixed-datanode-tasktracker-small}
   [{:roles #{:datanode :tasktracker}
     :pallet.vm.application-ram ?f
-    :pallet.vm.cores ?c}
+    :pallet.vm.cores ?c
+    :pallet.datanode.mx !_
+    :pallet.tasktracker.mx !_}
    {:pallet.datanode.mx 96
     :pallet.tasktracker.mx 192}
    (< ?f 2048)]
@@ -282,7 +288,8 @@
   ^{:name :total-child-process-size}
   [{:pallet.vm.application-ram ?f
     :pallet.datanode.mx ?d
-    :pallet.tasktracker.mx ?t}
+    :pallet.tasktracker.mx ?t
+    :pallet.task.mx !_}
    {:pallet.task.mx (- ?f ?d ?t)}]
 
   ^{:name :child-process-size}
@@ -295,16 +302,19 @@
 
   ;; replication
   ^{:name :replication}
-  [{:cluster {:datanodes ?d}}
+  [{:cluster {:datanodes ?d}
+    :dfs.replication !_}
    {:dfs.replication 3}]
 
   ^{:name :replication-single}
-  [{:cluster {:datanodes ?d}}
+  [{:cluster {:datanodes ?d}
+    :dfs.replication !_}
    {:dfs.replication 1}
    (< ?d 4)]
 
   ^{:name :replication-two}
-  [{:cluster {:datanodes ?d}}
+  [{:cluster {:datanodes ?d}
+    :dfs.replication !_}
    {:dfs.replication 2}
    (< ?d 10) (> ?d 3)]
 
@@ -331,7 +341,7 @@
   [target target
    node target-node
    cluster (cluster-role-counts)
-   m (m-result (palletops.locos/deep-merge
+   m (m-result (deep-merge
                 {:roles (:roles target)
                  :hardware (hardware node)
                  :cluster cluster}
@@ -341,6 +351,18 @@
   (assertf (seq config) "Failed to find a node config for %s" m)
   (m-result (debugf "node-config %s" config))
   (m-result config))
+
+(defn- dotted-keys->nested-maps
+  "Takes a map with key names containing dots, and turns them into nested maps."
+  [m re]
+  (reduce
+   (fn [m [k v]]
+     (if (re-matches re (name k))
+       (-> m
+           (dissoc k)
+           (assoc-in (->> (split (name k) #"\.") (map keyword)) v))
+       m))
+   m m))
 
 (def-plan-fn default-node-config
   "An all in one configuration function. You can pass a map of property values
@@ -354,5 +376,8 @@
   [os-size (os-size-model :rules os-rules :overrides config)
    node-config (node-config os-size :rules node-config-rules)]
   (m-result (->
-             (merge static-defaults hadoop-class-details os-size node-config)
-             (dissoc :hardware :roles :cluster))))
+             (deep-merge
+              static-defaults hadoop-class-details os-size node-config)
+             (dotted-keys->nested-maps #"pallet\..*")
+             (dissoc :hardware :roles :cluster)
+             (with-meta (meta node-config)))))
