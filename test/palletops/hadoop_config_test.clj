@@ -16,14 +16,14 @@
                                      :hardware (:m1.small instance-types))}})))]
     (is (= (merge
             {:hardware (:m1.small instance-types) :roles nil}
-            {:pallet.vm.ram 1740
-             :pallet.vm.cores 1
-             :pallet.vm.free-disk 150
-             :pallet.vm.disk-size 160
-             :pallet.os.size 300
-             :pallet.os.cache 288
-             :pallet.vm.application-ram 1142
-             :pallet.vm.free-ram 1430
+            {:config.vm.ram 1740
+             :config.vm.cores 1
+             :config.vm.free-disk 150
+             :config.vm.disk-size 160
+             :config.os.size 300
+             :config.os.cache 288
+             :config.vm.application-ram 1142
+             :config.vm.free-ram 1430
              :kernel.vm.overcommit_pc 25
              :kernel.vm.overcommit 1
              :kernel.vm.swapiness 0
@@ -41,7 +41,7 @@
                                :hardware (:m1.small instance-types))
               :roles #{:datanode :tasktracker}}
         result (first
-                ((default-node-config {})
+                ((default-node-config {:config {}})
                  (test-session
                   {:server node
                    :service-state [node]})))]
@@ -70,7 +70,7 @@
             :mapred.submit.replication 10
             :mapred.tasktracker.map.tasks.maximum 2
             :mapred.tasktracker.reduce.tasks.maximum 1
-            :pallet {:os {:cache 288
+            :config {:os {:cache 288
                           :size 300}
                      :childtask {:mx 284}
                      :datanode {:mx 96}
@@ -85,6 +85,7 @@
             :tasktracker.http.threads 46}
            result))
     (is (= [:mixed-datanode-tasktracker
+            :mixed-datanode-tasktracker-sub
             :mixed-datanode-tasktracker-du
             :mixed-datanode-tasktracker-small
             :total-child-process-size
@@ -94,16 +95,16 @@
 (deftest cc2-8xlarge-os-size-model-test
   (is (= {:roles nil
           :hardware (:cc2.8xlarge instance-types)
-          :pallet.vm.free-ram 61588
-          :pallet.vm.application-ram 49258
+          :config.vm.free-ram 61588
+          :config.vm.application-ram 49258
           :kernel.fs.file-max 65535
           :kernel.vm.overcommit 0
-          :pallet.os.cache 12330
-          :pallet.vm.ram 61952
-          :pallet.vm.cores 16
-          :pallet.vm.free-disk 3360
-          :pallet.vm.disk-size 3370
-          :pallet.os.size 300
+          :config.os.cache 12330
+          :config.vm.ram 61952
+          :config.vm.cores 16
+          :config.vm.free-disk 3360
+          :config.vm.disk-size 3370
+          :config.os.size 300
           :kernel.vm.swapiness 0}
          (first
           ((os-size-model)
@@ -140,7 +141,7 @@
             :mapred.tasktracker.map.tasks.maximum 32
             :mapred.tasktracker.reduce.tasks.maximum 9
             :mapred.submit.replication 10
-            :pallet {:childtask {:mx 1182}
+            :config {:childtask {:mx 1182}
                      :datanode {:mx 384}
                      :task {:mx 48490}
                      :tasktracker {:mx 384}

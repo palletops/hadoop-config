@@ -1,13 +1,14 @@
 (ns palletops.hadoop-config
   "Hadoop configuration library."
   (:use
-   [clojure.algo.monads :only [m-map]]
    [clojure.string :only [split]]
    [clojure.tools.logging :only [debugf]]
-   [palletops.locos :only [defrules deep-merge apply-productions !_]]
    [pallet.crate :only [def-plan-fn nodes-with-role target target-node]]
    [pallet.debug :only [assertf]]
-   [pallet.node :only [hardware]]))
+   [pallet.node :only [hardware]]
+   [pallet.monad.state-monad :only [m-map]]
+   [palletops.locos
+    :only [apply-productions deep-merge defrules not-pathc !_]]))
 
 ;;; Some static defaults, that have no dependent configuration values,
 ;;; and are not dependent on install location, daemon location, etc.
@@ -123,83 +124,83 @@
   ;; note that variants of a rule should have matching logic vars in the pattern
   ;; to ensure that they are all applied at once.
   ^{:name :default-ram}
-  [{:hardware {:ram ?r} :pallet.vm.ram !_}
-   {:pallet.vm.ram ?r}]
+  [{:hardware {:ram ?r} :config.vm.ram !_}
+   {:config.vm.ram ?r}]
 
   ^{:name :os-size-base}                ; estimate of os size
-  [{:hardware {:ram ?r} :pallet.os.size !_}
-   {:pallet.os.size 300}]
+  [{:hardware {:ram ?r} :config.os.size !_}
+   {:config.os.size 300}]
 
   ^{:name :total-cores}
-  [{:hardware {:cpus ?c} :pallet.vm.cores !_}
-   {:pallet.vm.cores (reduce + (map :cores ?c))}]
+  [{:hardware {:cpus ?c} :config.vm.cores !_}
+   {:config.vm.cores (reduce + (map :cores ?c))}]
 
   ^{:name :total-disk}
-  [{:hardware {:disks ?d} :pallet.vm.disk-size !_}
-   {:pallet.vm.disk-size (reduce + (map :size '?d))}]
+  [{:hardware {:disks ?d} :config.vm.disk-size !_}
+   {:config.vm.disk-size (reduce + (map :size '?d))}]
 
   ;; the free disk estimate needs to improve
   ;; OS, log files, metrics, etc all take disk space
   ^{:name :free-disk}
-  [{:pallet.vm.disk-size ?d :pallet.vm.free-disk !_}
-   {:pallet.vm.free-disk (- ?d 10) }]   ; Gb
+  [{:config.vm.disk-size ?d :config.vm.free-disk !_}
+   {:config.vm.free-disk (- ?d 10) }]   ; Gb
 
   ^{:name :os-cache}                    ; estimate of a reasonable disk cache
-  [{:pallet.vm.ram ?m :pallet.os.size ?o :pallet.os.cache !_}
-   {:pallet.os.cache (int (* (- ?m ?o) 0.2))}]
+  [{:config.vm.ram ?m :config.os.size ?o :config.os.cache !_}
+   {:config.os.cache (int (* (- ?m ?o) 0.2))}]
 
   ^{:name :file-descriptors}            ; file descriptors to configure
-  [{:pallet.vm.ram ?r :kernel.fs.file-max !_}
+  [{:config.vm.ram ?r :kernel.fs.file-max !_}
    {:kernel.fs.file-max 65535}]
 
   ^{:name :file-descriptors-small}
-  [{:pallet.vm.ram ?r :kernel.fs.file-max !_}
+  [{:config.vm.ram ?r :kernel.fs.file-max !_}
    {:kernel.fs.file-max 10240}
    (< ?r 2048)]
 
   ^{:name :swapiness}
-  [{:pallet.vm.ram ?r :kernel.vm.swapiness !_}
+  [{:config.vm.ram ?r :kernel.vm.swapiness !_}
    {:kernel.vm.swapiness 0
     :kernel.vm.overcommit 0}]
 
   ^{:name :swapiness-small}
-  [{:pallet.vm.ram ?r :kernel.vm.swapiness !_}
+  [{:config.vm.ram ?r :kernel.vm.swapiness !_}
    {:kernel.vm.swapiness 0
     :kernel.vm.overcommit 0}
    (< ?r 2048)]
 
   ^{:name :overcommit}
-  [{:pallet.vm.ram ?r :kernel.vm.overcommit !_}
+  [{:config.vm.ram ?r :kernel.vm.overcommit !_}
    {:kernel.vm.swapiness 0}]
 
   ^{:name :overcommit-small}
-  [{:pallet.vm.ram ?r :kernel.vm.overcommit !_}
+  [{:config.vm.ram ?r :kernel.vm.overcommit !_}
    {:kernel.vm.overcommit 1             ; maybe only matters when using hadoop
                                         ; streaming
     :kernel.vm.overcommit_pc 25}
    (< ?r 2048)]
 
   ^{:name :free-ram}                    ; ram - os ram - file descriptor space
-  [{:pallet.vm.free-ram !_
-    :pallet.vm.ram ?r
-    :pallet.os.size ?o
+  [{:config.vm.free-ram !_
+    :config.vm.ram ?r
+    :config.os.size ?o
     :kernel.fs.file-max ?f}
-   {:pallet.vm.free-ram
+   {:config.vm.free-ram
     (int (- ?r ?o (/ ?f 1024.0)))}]
 
   ^{:name :applicaton-ram}              ; free-ram - disk cache
-  [{:pallet.vm.free-ram ?f :pallet.vm.application-ram !_
-    :pallet.os.cache ?c}
-   {:pallet.vm.application-ram
+  [{:config.vm.free-ram ?f :config.vm.application-ram !_
+    :config.os.cache ?c}
+   {:config.vm.application-ram
     (int (- ?f ?c))}])
 
 
 
 (def-plan-fn os-size-model
   "Returns an estimate for the OS size on the current node. The rules can be
-   passed using the :rules keyword.  The :pallet.vm.free-ram returned is an
+   passed using the :rules keyword.  The :config.vm.free-ram returned is an
    estimate of the amount of ram consumed by the operating system.
-   The :pallet.vm.application-ram is the free ram, reduce by an estimate of
+   The :config.vm.application-ram is the free ram, reduce by an estimate of
    a reasonable disk cache size.
 
    We use a 1K per file descriptor estimator for file descriptor size.
@@ -229,75 +230,81 @@
 
   ^{:name :dedicated-namenode}
   [{:roles #{:namenode :datanode}
-    :pallet.vm.application-ram ?f
+    :config.vm.application-ram ?f
     :cluster {:datanodes ?d}}
-   {:pallet.namenode.mx ?f
+   {:config.namenode.mx ?f
     :dfs.namenode.handler.count (max 10 (int (* 20 (Math/log (double ?d)))))}]
 
   ^{:name :dedicated-jobtracker}
   [{:roles #{:jobtracker}
-    :pallet.vm.application-ram ?f
+    :config.vm.application-ram ?f
     :cluster {:tasknodes ?t}}
-   {:pallet.jobtracker.mx ?f
+   {:config.jobtracker.mx ?f
     :mapred.job.tracker.handler.count
     (max 10 (int (* 20 (Math/log (double ?t)))))}]
 
   ^{:name :mixed-namenode-jobtracker}
   [{:roles #{:namenode :jobtracker :datanode}
-    :pallet.vm.application-ram ?f
+    :config.vm.application-ram ?f
     :cluster {:tasknodes ?t}}
-   {:pallet.namenode.mx (* ?f 0.25)
-    :pallet.jobtracker.mx (* ?r 0.75)}]
+   {:config.namenode.mx (* ?f 0.25)
+    :config.jobtracker.mx (* ?r 0.75)}]
 
   ^{:name :mixed-namenode-jobtracker-small}
   [{:roles #{:namenode :jobtracker :datanode}
-    :pallet.vm.application-ram ?f}
-   {:pallet.namenode.mx 384
-    :pallet.jobtracker.mx 384}
+    :config.vm.application-ram ?f}
+   {:config.namenode.mx 384
+    :config.jobtracker.mx 384}
    (< ?f 2048)]
 
   ^{:name :mixed-datanode-tasktracker}
   [{:roles #{:datanode :tasktracker}
-    :pallet.vm.application-ram ?f
-    :pallet.vm.cores ?c
-    :pallet.datanode.mx !_
-    :pallet.tasktracker.mx !_}
-   {:pallet.datanode.mx 384
-    :pallet.tasktracker.mx 384
+    :config.vm.application-ram ?f
+    :config.vm.cores ?c
+    :config.datanode.mx !_
+    :config.tasktracker.mx !_}
+   {:config.datanode.mx 384
+    :config.tasktracker.mx 384
     :mapred.tasktracker.map.tasks.maximum (int (* 2 ?c))
     :mapred.tasktracker.reduce.tasks.maximum (max 1 (int (* 0.6 ?c)))
     :tasktracker.http.threads 46
     :dfs.datanode.max.xcievers 4096}]
 
+  ^{:name :mixed-datanode-tasktracker-sub}
+  [{:config ?p
+    :config.vm.application-ram ?f}
+   {:config {:namenode {:mx ?f}}}
+   (not-pathc ?p [:namenode :mx])]
+
   ^{:name :mixed-datanode-tasktracker-du}
   [{:roles #{:datanode :tasktracker}
-    :pallet.vm.free-disk ?d
+    :config.vm.free-disk ?d
     :dfs.datanode.du.reserved !_}
    {:dfs.datanode.du.reserved (bigint (* 0.3 ?d))}] ; a guess (bytes/volume)
 
   ^{:name :mixed-datanode-tasktracker-small}
   [{:roles #{:datanode :tasktracker}
-    :pallet.vm.application-ram ?f
-    :pallet.vm.cores ?c
-    :pallet.datanode.mx !_
-    :pallet.tasktracker.mx !_}
-   {:pallet.datanode.mx 96
-    :pallet.tasktracker.mx 192}
+    :config.vm.application-ram ?f
+    :config.vm.cores ?c
+    :config.datanode.mx !_
+    :config.tasktracker.mx !_}
+   {:config.datanode.mx 96
+    :config.tasktracker.mx 192}
    (< ?f 2048)]
 
   ^{:name :total-child-process-size}
-  [{:pallet.vm.application-ram ?f
-    :pallet.datanode.mx ?d
-    :pallet.tasktracker.mx ?t
-    :pallet.task.mx !_}
-   {:pallet.task.mx (- ?f ?d ?t)}]
+  [{:config.vm.application-ram ?f
+    :config.datanode.mx ?d
+    :config.tasktracker.mx ?t
+    :config.task.mx !_}
+   {:config.task.mx (- ?f ?d ?t)}]
 
   ^{:name :child-process-size}
-  [{:pallet.childtask.mx !_
-    :pallet.task.mx ?t
+  [{:config.childtask.mx !_
+    :config.task.mx ?t
     :mapred.tasktracker.map.tasks.maximum ?m
     :mapred.tasktracker.reduce.tasks.maximum ?r}
-   {:pallet.childtask.mx (int (/ ?t (+ ?m ?r)))}]
+   {:config.childtask.mx (int (/ ?t (+ ?m ?r)))}]
 
 
   ;; replication
@@ -385,6 +392,7 @@
              :or {os-rules os-size-rules
                   node-config-rules node-config-sizing-rules}}]
   [os-size (os-size-model :rules os-rules :overrides config)
+   _ (m-result (debugf "os-size %s" os-size))
    node-config (node-config os-size :rules node-config-rules)]
   (m-result (->
              (deep-merge
