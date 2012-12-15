@@ -6,4 +6,7 @@
                  [org.cloudhoist/pallet "0.8.0-alpha.6"]
                  [org.clojure/clojure "1.4.0"]]
   :repositories
-  {"sonatype" {:url "https://oss.sonatype.org/content/repositories/releases/"}})
+  {"sonatype" {:url "https://oss.sonatype.org/content/repositories/releases/"}}
+  :test-selectors {:default (complement :live-test)
+                   :live-test :live-test
+                   :all (constantly true)})

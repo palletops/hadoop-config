@@ -41,7 +41,7 @@
                                :hardware (:m1.small instance-types))
               :roles #{:datanode :tasktracker}}
         result (first
-                ((default-node-config {:config {}})
+                ((default-node-config {})
                  (test-session
                   {:server node
                    :service-state [node]})))]
@@ -70,22 +70,21 @@
             :mapred.submit.replication 10
             :mapred.tasktracker.map.tasks.maximum 2
             :mapred.tasktracker.reduce.tasks.maximum 1
-            :config {:os {:cache 288
-                          :size 300}
-                     :childtask {:mx 284}
-                     :datanode {:mx 96}
-                     :task {:mx 854}
-                     :tasktracker {:mx 192}
-                     :vm {:application-ram 1142
-                          :cores 1
-                          :disk-size 160
-                          :free-disk 150
-                          :free-ram 1430
-                          :ram 1740}}
+            :config.os.cache 288
+            :config.os.size 300
+            :config.childtask.mx 284
+            :config.datanode.mx 96
+            :config.task.mx 854
+            :config.tasktracker.mx 192
+            :config.vm.application-ram 1142
+            :config.vm.cores 1
+            :config.vm.disk-size 160
+            :config.vm.free-disk 150
+            :config.vm.free-ram 1430
+            :config.vm.ram 1740
             :tasktracker.http.threads 46}
            result))
     (is (= [:mixed-datanode-tasktracker
-            :mixed-datanode-tasktracker-sub
             :mixed-datanode-tasktracker-du
             :mixed-datanode-tasktracker-small
             :total-child-process-size
@@ -141,18 +140,18 @@
             :mapred.tasktracker.map.tasks.maximum 32
             :mapred.tasktracker.reduce.tasks.maximum 9
             :mapred.submit.replication 10
-            :config {:childtask {:mx 1182}
-                     :datanode {:mx 384}
-                     :task {:mx 48490}
-                     :tasktracker {:mx 384}
-                     :os {:cache 12330
-                          :size 300}
-                     :vm {:application-ram 49258
-                          :cores 16
-                          :disk-size 3370
-                          :free-disk 3360
-                          :free-ram 61588
-                          :ram 61952}}
+            :config.childtask.mx 1182
+            :config.datanode.mx 384
+            :config.task.mx 48490
+            :config.tasktracker.mx 384
+            :config.os.cache 12330
+            :config.os.size 300
+            :config.vm.application-ram 49258
+            :config.vm.cores 16
+            :config.vm.disk-size 3370
+            :config.vm.free-disk 3360
+            :config.vm.free-ram 61588
+            :config.vm.ram 61952
             :tasktracker.http.threads 46
             }
            (first

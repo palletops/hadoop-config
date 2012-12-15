@@ -270,12 +270,6 @@
     :tasktracker.http.threads 46
     :dfs.datanode.max.xcievers 4096}]
 
-  ^{:name :mixed-datanode-tasktracker-sub}
-  [{:config ?p
-    :config.vm.application-ram ?f}
-   {:config {:namenode {:mx ?f}}}
-   (not-pathc ?p [:namenode :mx])]
-
   ^{:name :mixed-datanode-tasktracker-du}
   [{:roles #{:datanode :tasktracker}
     :config.vm.free-disk ?d
