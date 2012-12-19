@@ -137,13 +137,13 @@
 
   ^{:name :total-disk}
   [{:hardware {:disks ?d} :config.vm.disk-size !_}
-   {:config.vm.disk-size (reduce + (map :size '?d))}]
+   {:config.vm.disk-size (reduce + 0 (map :size '?d))}]
 
   ;; the free disk estimate needs to improve
   ;; OS, log files, metrics, etc all take disk space
   ^{:name :free-disk}
   [{:config.vm.disk-size ?d :config.vm.free-disk !_}
-   {:config.vm.free-disk (- ?d 10) }]   ; Gb
+   {:config.vm.free-disk (max (- ?d 10) 2) }] ; Gb
 
   ^{:name :os-cache}                    ; estimate of a reasonable disk cache
   [{:config.vm.ram ?m :config.os.size ?o :config.os.cache !_}
