@@ -3,10 +3,9 @@
   (:use
    [clojure.string :only [split]]
    [clojure.tools.logging :only [debugf]]
-   [pallet.crate :only [def-plan-fn nodes-with-role target target-node]]
+   [pallet.crate :only [defplan nodes-with-role target target-node]]
    [pallet.debug :only [assertf]]
    [pallet.node :only [hardware]]
-   [pallet.monad.state-monad :only [m-map]]
    [palletops.locos
     :only [apply-productions deep-merge defrules not-pathc !_]]))
 
@@ -196,7 +195,7 @@
 
 
 
-(def-plan-fn os-size-model
+(defplan os-size-model
   "Returns an estimate for the OS size on the current node. The rules can be
    passed using the :rules keyword.  The :config.vm.free-ram returned is an
    estimate of the amount of ram consumed by the operating system.
@@ -207,14 +206,14 @@
 
    Estimates can be overridden by passing a map to :overrides."
   [& {:keys [rules overrides] :or {rules os-size-rules}}]
-  [target target
-   node target-node
-   m (m-result (merge {:roles (:roles target)
-                       :hardware (hardware node)}
-                      overrides))
-   model (m-result (apply-productions m rules))]
-  (assertf (seq model) "Failed to find an os size model for %s" m)
-  (m-result model))
+  (let [target (target)
+        node (target-node)
+        m (merge {:roles (:roles target)
+                  :hardware (hardware node)}
+                 overrides)
+        model (apply-productions m rules)]
+    (assertf (seq model) "Failed to find an os size model for %s" m)
+    model))
 
 ;;; # Node Configuration Sizing
 
@@ -323,33 +322,34 @@
   ;; dfs.block.size
   )
 
-(def-plan-fn node-count-for-role
+(defplan node-count-for-role
   [role]
-  [nodes (nodes-with-role role)]
-  (m-result [role (count nodes)]))
+  (let [nodes (nodes-with-role role)]
+    [role (count nodes)]))
 
-(def-plan-fn cluster-role-counts
+(defplan cluster-role-counts
   []
-  [count-vecs (m-map node-count-for-role
-                     [:jobtracker :namenode :tasktracker :datanode])]
-  (m-result (into {} count-vecs)))
+  (let [count-vecs (map
+                    node-count-for-role
+                    [:jobtracker :namenode :tasktracker :datanode])]
+    (into {} count-vecs)))
 
-(def-plan-fn node-config
+(defplan node-config
   "Plan function to return a configuration map for a node. The rules can
    be passed with the :rules keyword."
   [os-size & {:keys [rules] :or {rules node-config-sizing-rules}}]
-  [target target
-   node target-node
-   cluster (cluster-role-counts)
-   m (m-result (deep-merge
-                {:roles (:roles target)
-                 :hardware (hardware node)
-                 :cluster cluster}
-                os-size))
-   config (m-result (apply-productions m rules))]
-  (assertf (seq config) "Failed to find a node config for %s" m)
-  (m-result (debugf "node-config %s" config))
-  (m-result config))
+  (let [target (target)
+        node (target-node)
+        cluster (cluster-role-counts)
+        m (deep-merge
+            {:roles (:roles target)
+             :hardware (hardware node)
+             :cluster cluster}
+            os-size)
+        config (apply-productions m rules)]
+    (assertf (seq config) "Failed to find a node config for %s" m)
+    (debugf "node-config %s" config)
+    config))
 
 (defn- dotted-keys->nested-maps
   "Takes a map with key names containing dots, and turns them into nested maps."
@@ -376,7 +376,7 @@
   ([m]
      (nested-maps->dotted-keys m "")))
 
-(def-plan-fn default-node-config
+(defplan default-node-config
   "An all in one configuration function. You can pass a map of property values
   as `config`.
 
@@ -385,12 +385,12 @@
   [config & {:keys [os-rules node-config-rules]
              :or {os-rules os-size-rules
                   node-config-rules node-config-sizing-rules}}]
-  [os-size (os-size-model :rules os-rules :overrides config)
-   _ (m-result (debugf "os-size %s" os-size))
-   node-config (node-config os-size :rules node-config-rules)]
-  (m-result (->
-             (deep-merge
-              static-defaults hadoop-class-details os-size node-config)
-             (dotted-keys->nested-maps #"pallet\..*")
-             (dissoc :hardware :roles :cluster)
-             (with-meta (meta node-config)))))
+  (let [os-size (os-size-model :rules os-rules :overrides config)
+        _ (debugf "os-size %s" os-size)
+        node-config (node-config os-size :rules node-config-rules)]
+    (->
+     (deep-merge
+      static-defaults hadoop-class-details os-size node-config)
+     (dotted-keys->nested-maps #"pallet\..*")
+     (dissoc :hardware :roles :cluster)
+     (with-meta (meta node-config)))))

@@ -4,16 +4,17 @@
    clojure.pprint
    palletops.hadoop-config
    [pallet.compute.node-list :only [make-node]]
+   [pallet.core.session :only [with-session]]
    [pallet.test-utils :only [test-session]]
    [palletops.ec2.meta :only [instance-types]]))
 
 (deftest m1-small-os-size-model-test
-  (let [result (first
-                ((os-size-model)
-                 (test-session
-                  {:server
-                   {:node (make-node "nn" "gg" "123.123.12.12" :ubuntu
-                                     :hardware (:m1.small instance-types))}})))]
+  (let [result (with-session
+                   (test-session
+                    {:server
+                     {:node (make-node "nn" "gg" "123.123.12.12" :ubuntu
+                                       :hardware (:m1.small instance-types))}})
+                 (os-size-model))]
     (is (= (merge
             {:hardware (:m1.small instance-types) :roles nil}
             {:config.vm.ram 1740
@@ -40,11 +41,10 @@
   (let [node {:node (make-node "nn" "gg" "123.123.12.12" :ubuntu
                                :hardware (:m1.small instance-types))
               :roles #{:datanode :tasktracker}}
-        result (first
-                ((default-node-config {})
-                 (test-session
-                  {:server node
-                   :service-state [node]})))]
+        result (with-session (test-session
+                              {:server node
+                               :service-state [node]})
+                 (default-node-config {}))]
     (is (= {
             :dfs.permissions.enabled true
             :dfs.datanode.du.reserved 45N
@@ -105,12 +105,12 @@
           :config.vm.disk-size 3370
           :config.os.size 300
           :kernel.vm.swapiness 0}
-         (first
-          ((os-size-model)
-           (test-session
-            {:server
-             {:node (make-node "nn" "gg" "123.123.12.12" :ubuntu
-                               :hardware (:cc2.8xlarge instance-types))}}))))))
+         (with-session (test-session
+                        {:server
+                         {:node (make-node
+                                 "nn" "gg" "123.123.12.12" :ubuntu
+                                 :hardware (:cc2.8xlarge instance-types))}})
+           (os-size-model)))))
 
 (deftest cc2-8xlarge-default-node-config-test
   (let [node {:node (make-node "nn" "gg" "123.123.12.12" :ubuntu
@@ -152,10 +152,8 @@
             :config.vm.free-disk 3360
             :config.vm.free-ram 61588
             :config.vm.ram 61952
-            :tasktracker.http.threads 46
-            }
-           (first
-            ((default-node-config {})
-             (test-session
-              {:server node
-               :service-state [node]})))))))
+            :tasktracker.http.threads 46}
+           (with-session (test-session
+                          {:server node
+                           :service-state [node]})
+             (default-node-config {}))))))
