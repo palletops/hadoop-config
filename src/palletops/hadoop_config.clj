@@ -2,7 +2,7 @@
   "Hadoop configuration library."
   (:use
    [clojure.string :only [split]]
-   [clojure.tools.logging :only [debugf]]
+   [clojure.tools.logging :only [debugf tracef]]
    [pallet.crate :only [defplan nodes-with-role target target-node]]
    [pallet.debug :only [assertf]]
    [pallet.node :only [hardware]]
@@ -194,8 +194,9 @@
     (int (- ?f ?c))}])
 
 
-
-(defplan os-size-model
+;; plain function to prevent logging of arguments (which may contain
+;; credentials)
+(defn os-size-model
   "Returns an estimate for the OS size on the current node. The rules can be
    passed using the :rules keyword.  The :config.vm.free-ram returned is an
    estimate of the amount of ram consumed by the operating system.
@@ -334,7 +335,9 @@
                     [:jobtracker :namenode :tasktracker :datanode])]
     (into {} count-vecs)))
 
-(defplan node-config
+;; plain function to prevent logging of arguments (which may contain
+;; credentials)
+(defn node-config
   "Plan function to return a configuration map for a node. The rules can
    be passed with the :rules keyword."
   [os-size & {:keys [rules] :or {rules node-config-sizing-rules}}]
@@ -348,7 +351,7 @@
             os-size)
         config (apply-productions m rules)]
     (assertf (seq config) "Failed to find a node config for %s" m)
-    (debugf "node-config %s" config)
+    (tracef "node-config %s" config)
     config))
 
 (defn- dotted-keys->nested-maps
@@ -376,7 +379,8 @@
   ([m]
      (nested-maps->dotted-keys m "")))
 
-(defplan default-node-config
+;;;  Use a plain defn to prevent logging of args, which can include credentials
+(defn default-node-config
   "An all in one configuration function. You can pass a map of property values
   as `config`.
 
@@ -386,7 +390,7 @@
              :or {os-rules os-size-rules
                   node-config-rules node-config-sizing-rules}}]
   (let [os-size (os-size-model :rules os-rules :overrides config)
-        _ (debugf "os-size %s" os-size)
+        _ (tracef "os-size %s" os-size) ; may contain credentials
         node-config (node-config os-size :rules node-config-rules)]
     (->
      (deep-merge
