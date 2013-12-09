@@ -7,5 +7,5 @@
               #"com.palletops/hadoop-config \"\d+\.\d+\.\d+\""}]}}
  :dev
  {:dependencies
-  [[org.cloudhoist/pallet "0.8.0-SNAPSHOT" :classifier "tests"]
+  [[com.palletops/pallet "0.8.0-beta.8" :classifier "tests"]
    [ch.qos.logback/logback-classic "1.0.0"]]}}
