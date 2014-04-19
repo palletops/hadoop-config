@@ -12,6 +12,6 @@ Add the following to your `:dependencies`:
 
 ## License
 
-Copyright © 2012 Hugo Duncan
+Licensed under [EPL](http://www.eclipse.org/legal/epl-v10.1.1.html)
 
-All rights reserved.
+Copyright © 2012-2014 Hugo Duncan, Antoni Batchelli
