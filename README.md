@@ -7,11 +7,11 @@ Hadoop configuration library.
 Add the following to your `:dependencies`:
 
 ```clj
-[palletops/hadoop-config "0.1.0"]
+[palletops/hadoop-config "0.1.1"]
 ```
 
 ## License
 
-Copyright © 2012 Hugo Duncan
+Licensed under [EPL](http://www.eclipse.org/legal/epl-v10.1.1.html)
 
-All rights reserved.
+Copyright © 2012-2014 Hugo Duncan, Antoni Batchelli
