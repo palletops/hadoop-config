@@ -7,7 +7,7 @@ Hadoop configuration library.
 Add the following to your `:dependencies`:
 
 ```clj
-[palletops/hadoop-config "0.1.0"]
+[palletops/hadoop-config "0.1.1"]
 ```
 
 ## License

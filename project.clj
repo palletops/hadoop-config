@@ -1,4 +1,4 @@
-(defproject com.palletops/hadoop-config "0.1.1-SNAPSHOT"
+(defproject com.palletops/hadoop-config "0.1.1"
   :description "Hadoop configuration library"
   :url "https://github.com/palletops/hadoop-config"
   :license {:name "Eclipse Public License"
