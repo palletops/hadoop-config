@@ -9,6 +9,10 @@
    [palletops.locos
     :only [apply-productions deep-merge defrules not-pathc !_]]))
 
+(defmethod print-dup org.joda.time.DateTime
+  [o writer]
+  (.write writer (format "#inst \"%s\"" o)))
+
 ;;; Some static defaults, that have no dependent configuration values,
 ;;; and are not dependent on install location, daemon location, etc.
 (def static-defaults
@@ -136,7 +140,8 @@
 
   ^{:name :total-disk}
   [{:hardware {:disks ?d} :config.vm.disk-size !_}
-   {:config.vm.disk-size (reduce + 0 (map :size '?d))}]
+   ;; EBS root volumes do not report size
+   {:config.vm.disk-size (reduce + 0 (map #(:size %1 0) '?d))}]
 
   ;; the free disk estimate needs to improve
   ;; OS, log files, metrics, etc all take disk space
