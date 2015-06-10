@@ -9,10 +9,6 @@
    [palletops.locos
     :only [apply-productions deep-merge defrules not-pathc !_]]))
 
-(defmethod print-dup org.joda.time.DateTime
-  [o writer]
-  (.write writer (format "#inst \"%s\"" o)))
-
 ;;; Some static defaults, that have no dependent configuration values,
 ;;; and are not dependent on install location, daemon location, etc.
 (def static-defaults
