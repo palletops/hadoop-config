@@ -136,7 +136,8 @@
 
   ^{:name :total-disk}
   [{:hardware {:disks ?d} :config.vm.disk-size !_}
-   {:config.vm.disk-size (reduce + 0 (map :size '?d))}]
+   ;; EBS root volumes do not report size
+   {:config.vm.disk-size (reduce + 0 (map #(:size %1 0) '?d))}]
 
   ;; the free disk estimate needs to improve
   ;; OS, log files, metrics, etc all take disk space

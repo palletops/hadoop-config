@@ -1,3 +1,13 @@
+## 0.1.2
+
+- Remove print-dup method for joda DateTime
+
+- Update pallet and locos versions
+
+- Fix disk sizing for EBS root volume
+
+- Update dependency versions
+
 ## 0.1.1
 
 - Initialize repo for releases via lein-pallet-release.
